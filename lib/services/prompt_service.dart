@@ -35,3 +35,36 @@ bool enableTheme() {
     defaultValue: true,
   ).interact();
 }
+// ---- AI questionnaire additions ----
+
+/// Q1: project type / scale. Returns: 'small' | 'medium' | 'complex'.
+String selectProjectScale() {
+  final options = [
+    'Small (MVP, 1-3 features)',
+    'Medium (5-8 features)',
+    'Complex (modular, many features)',
+  ];
+  final i = Select(prompt: 'Project type?', options: options).interact();
+  return ['small', 'medium', 'complex'][i];
+}
+
+/// Q2: project cost / budget — controls scope. Returns: 'low' | 'medium' | 'high'.
+String selectProjectBudget() {
+  final i = Select(
+    prompt: 'Project cost / budget?',
+    options: ['Low', 'Medium', 'High'],
+  ).interact();
+  return ['low', 'medium', 'high'][i];
+}
+
+/// Q3: free-text features (AI cleans these into snake_case names).
+String askFeaturesBrief() {
+  return Input(prompt: 'Describe the features you need (plain English):')
+      .interact();
+}
+
+/// Q5: design brief for theme.
+String askDesignBrief() {
+  return Input(prompt: 'Design style? (e.g. "Material 3, dark, teal accent")')
+      .interact();
+}

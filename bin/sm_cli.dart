@@ -4,6 +4,7 @@ import 'package:args/args.dart';
 import 'package:sm_cli/commands/init_command.dart';
 import 'package:sm_cli/commands/make_command.dart';
 import 'package:sm_cli/commands/remove_command.dart';
+import 'package:sm_cli/commands/ai_command.dart';
 import 'package:sm_cli/services/config_service.dart';
 import 'package:sm_cli/services/prompt_service.dart';
 
@@ -38,6 +39,9 @@ void main(List<String> arguments) async {
 
   // LIST COMMAND
   parser.addCommand('list');
+
+  // AI COMMAND
+  parser.addCommand('ai');
 
   // HELP & VERSION
   parser.addFlag('help', abbr: 'h', negatable: false, help: 'Show help');
@@ -239,6 +243,16 @@ void main(List<String> arguments) async {
     print('Total: ${features.length} feature(s)');
   }
 
+  // ---- AI ----
+  else if (results.command?.name == 'ai') {
+    if (results.command!.rest.isEmpty) {
+      print('❌ Please provide project name');
+      print('   Usage: sm ai <project_name>');
+      return;
+    }
+    await runAiInit(results.command!.rest.first);
+  }
+
   else {
     _printHelp();
   }
@@ -254,6 +268,7 @@ Usage:
   sm make api <project>                         Generate API layer (Dio)
   sm remove feature <project> <feature>         Remove a feature
   sm list <project>                             List all features
+  sm ai <project>                               AI-assisted project setup
 
 Flags for init:
   -r, --riverpod    Use Riverpod (default: interactive)

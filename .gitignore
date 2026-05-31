@@ -2,3 +2,5 @@
 # Created by `dart pub`
 .dart_tool/
 my_app/
+/CLAUDE.md
+/.env
