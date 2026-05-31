@@ -1,5 +1,7 @@
 import 'package:interact/interact.dart';
 
+import 'ai/ai_provider.dart';
+
 /// Prompts user to select state management interactively.
 ///
 /// Returns one of: `'Riverpod'`, `'Bloc'`, `'GetX'`, `'Provider'`
@@ -67,4 +69,20 @@ String askFeaturesBrief() {
 String askDesignBrief() {
   return Input(prompt: 'Design style? (e.g. "Material 3, dark, teal accent")')
       .interact();
+}
+
+/// Pick AI provider. Returns the provider id (e.g. 'claude').
+String selectProvider() {
+  final ids = supportedProviderIds;
+  final labels = ids.map((id) => providerLabels[id] ?? id).toList();
+  final i = Select(prompt: 'Which AI provider?', options: labels).interact();
+  return ids[i];
+}
+
+/// Prompt for an API key (masked input — won't echo to terminal).
+String askApiKey(String providerLabel) {
+  return Password(
+    prompt: 'Enter $providerLabel API key',
+    confirmation: false,
+  ).interact();
 }

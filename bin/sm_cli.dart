@@ -5,6 +5,7 @@ import 'package:sm_cli/commands/init_command.dart';
 import 'package:sm_cli/commands/make_command.dart';
 import 'package:sm_cli/commands/remove_command.dart';
 import 'package:sm_cli/commands/ai_command.dart';
+import 'package:sm_cli/commands/ai_config_command.dart';
 import 'package:sm_cli/services/config_service.dart';
 import 'package:sm_cli/services/prompt_service.dart';
 
@@ -41,7 +42,11 @@ void main(List<String> arguments) async {
   parser.addCommand('list');
 
   // AI COMMAND
-  parser.addCommand('ai');
+  final aiConfigCommand = ArgParser()
+    ..addFlag('list', negatable: false, help: 'List configured providers')
+    ..addFlag('reset', negatable: false, help: 'Wipe all stored credentials');
+  final aiCommand = ArgParser()..addCommand('config', aiConfigCommand);
+  parser.addCommand('ai', aiCommand);
 
   // HELP & VERSION
   parser.addFlag('help', abbr: 'h', negatable: false, help: 'Show help');
@@ -245,9 +250,15 @@ void main(List<String> arguments) async {
 
   // ---- AI ----
   else if (results.command?.name == 'ai') {
+    final sub = results.command!.command;
+    if (sub?.name == 'config') {
+      await runAiConfig(sub!);
+      return;
+    }
     if (results.command!.rest.isEmpty) {
       print('❌ Please provide project name');
       print('   Usage: sm ai <project_name>');
+      print('          sm ai config [--list|--reset]');
       return;
     }
     await runAiInit(results.command!.rest.first);
@@ -269,6 +280,7 @@ Usage:
   sm remove feature <project> <feature>         Remove a feature
   sm list <project>                             List all features
   sm ai <project>                               AI-assisted project setup
+  sm ai config [--list|--reset]                 Manage stored AI keys
 
 Flags for init:
   -r, --riverpod    Use Riverpod (default: interactive)
