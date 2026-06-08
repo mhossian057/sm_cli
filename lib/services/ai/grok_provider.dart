@@ -27,7 +27,15 @@ class GrokProvider extends AiProvider {
     required String featuresBrief,
     required String stateMgmt,
     required String designBrief,
+    List<DesignAsset> assets = const [],
   }) async {
+    if (assets.isNotEmpty) {
+      throw UnimplementedError(
+        'Grok vision is not wired up. Re-run without --design / --figma, '
+        'or switch provider with `sm ai config` (Claude/OpenAI/Gemini all '
+        'accept reference images).',
+      );
+    }
     final http.Response res;
     try {
       res = await http.post(
@@ -77,5 +85,20 @@ class GrokProvider extends AiProvider {
     } on FormatException catch (e) {
       throw Exception('Grok did not return valid JSON: $e\nGot:\n$text');
     }
+  }
+
+  @override
+  Future<ImplementResult> generateCode({
+    required String apiKey,
+    required String model,
+    required String systemPrompt,
+    required String userPrompt,
+    required List<DesignAsset> assets,
+  }) async {
+    throw UnimplementedError(
+      'Grok vision is not wired up. `sm ai implement` requires a vision-'
+      'capable provider — switch via `sm ai config` to Claude, OpenAI, '
+      'or Gemini.',
+    );
   }
 }

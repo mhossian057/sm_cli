@@ -1,6 +1,6 @@
 name: sm_cli
 description: A Flutter Clean Architecture CLI generator for scalable production apps. Supports Riverpod, Bloc, GetX, Provider — with GoRouter, Dio, themes, and feature-based clean structure.
-version: 1.0.8
+version: 1.0.21
 
 homepage: https://github.com/flutterbysunny/sm_cli
 repository: https://github.com/flutterbysunny/sm_cli

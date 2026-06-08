@@ -26,7 +26,32 @@ class OpenAiProvider extends AiProvider {
     required String featuresBrief,
     required String stateMgmt,
     required String designBrief,
+    List<DesignAsset> assets = const [],
   }) async {
+    final userText = PlanPromptBuilder.user(
+      scale: scale,
+      budget: budget,
+      featuresBrief: featuresBrief,
+      stateMgmt: stateMgmt,
+      designBrief: designBrief,
+      assets: assets,
+    );
+
+    // OpenAI vision: content array with text + image_url(data URI) parts.
+    // Plain string content is still accepted when there are no images.
+    final dynamic userContent = assets.isEmpty
+        ? userText
+        : <Map<String, dynamic>>[
+            {'type': 'text', 'text': userText},
+            for (final a in assets)
+              {
+                'type': 'image_url',
+                'image_url': {
+                  'url': 'data:${a.mimeType};base64,${a.base64Data}',
+                },
+              },
+          ];
+
     final http.Response res;
     try {
       res = await http.post(
@@ -43,19 +68,10 @@ class OpenAiProvider extends AiProvider {
           'response_format': {'type': 'json_object'},
           'messages': [
             {'role': 'system', 'content': PlanPromptBuilder.system},
-            {
-              'role': 'user',
-              'content': PlanPromptBuilder.user(
-                scale: scale,
-                budget: budget,
-                featuresBrief: featuresBrief,
-                stateMgmt: stateMgmt,
-                designBrief: designBrief,
-              ),
-            },
+            {'role': 'user', 'content': userContent},
           ],
         }),
-      ).timeout(const Duration(seconds: 60));
+      ).timeout(const Duration(seconds: 90));
     } on Exception catch (e) {
       throw Exception('Could not reach OpenAI API: $e');
     }
@@ -75,6 +91,70 @@ class OpenAiProvider extends AiProvider {
 
     try {
       return PlanPromptBuilder.parse(text);
+    } on FormatException catch (e) {
+      throw Exception('OpenAI did not return valid JSON: $e\nGot:\n$text');
+    }
+  }
+
+  @override
+  Future<ImplementResult> generateCode({
+    required String apiKey,
+    required String model,
+    required String systemPrompt,
+    required String userPrompt,
+    required List<DesignAsset> assets,
+  }) async {
+    if (assets.isEmpty) {
+      throw ArgumentError('generateCode requires at least one DesignAsset.');
+    }
+    final userContent = <Map<String, dynamic>>[
+      {'type': 'text', 'text': userPrompt},
+      for (final a in assets)
+        {
+          'type': 'image_url',
+          'image_url': {
+            'url': 'data:${a.mimeType};base64,${a.base64Data}',
+          },
+        },
+    ];
+
+    final http.Response res;
+    try {
+      res = await http.post(
+        Uri.parse(_endpoint),
+        headers: {
+          'content-type': 'application/json',
+          'authorization': 'Bearer $apiKey',
+        },
+        body: jsonEncode({
+          'model': model,
+          'max_tokens': 8192,
+          // JSON output now — the prompt produces {screen, widgets[]}.
+          'response_format': {'type': 'json_object'},
+          'messages': [
+            {'role': 'system', 'content': systemPrompt},
+            {'role': 'user', 'content': userContent},
+          ],
+        }),
+      ).timeout(const Duration(seconds: 180));
+    } on Exception catch (e) {
+      throw Exception('Could not reach OpenAI API: $e');
+    }
+
+    if (res.statusCode != 200) {
+      throw Exception('OpenAI request failed (${res.statusCode}): ${res.body}');
+    }
+
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final choices = body['choices'] as List? ?? const [];
+    if (choices.isEmpty) {
+      throw Exception('OpenAI returned no choices:\n${res.body}');
+    }
+    final text = ((choices.first as Map)['message'] as Map)['content']
+            as String? ??
+        '';
+    try {
+      return ImplementPromptBuilder.parse(text);
     } on FormatException catch (e) {
       throw Exception('OpenAI did not return valid JSON: $e\nGot:\n$text');
     }

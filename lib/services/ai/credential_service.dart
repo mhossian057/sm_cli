@@ -127,6 +127,27 @@ class CredentialService {
         .toList();
   }
 
+  // ---- figma token (top-level, not provider-scoped) ----
+
+  /// Env var `FIGMA_TOKEN` > stored token > null.
+  static String? resolveFigmaToken() {
+    final env = Platform.environment['FIGMA_TOKEN'];
+    if (env != null && env.isNotEmpty) return env;
+    return _read()['figma_token'] as String?;
+  }
+
+  static void setFigmaToken(String token) {
+    final data = _read();
+    data['figma_token'] = token;
+    _write(data);
+  }
+
+  static void clearFigmaToken() {
+    final data = _read();
+    data.remove('figma_token');
+    _write(data);
+  }
+
   // ---- resolution ----
 
   /// Env var > stored credentials > null.

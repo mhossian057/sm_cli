@@ -15,6 +15,10 @@ Future<void> initProject({
   required bool getx,
   bool useGoRouter = true,
   bool useTheme = true,
+  String themeMode = 'system',
+  String seedColorHex = '#2196F3',
+  String? displayFont,
+  String? bodyFont,
 }) async {
   await createFlutterProject(projectName);
 
@@ -33,7 +37,13 @@ Future<void> initProject({
   }
 
   if (useTheme) {
-    createThemeFile(projectName);
+    createThemeFile(
+      projectName,
+      themeMode: themeMode,
+      seedColorHex: seedColorHex,
+      displayFont: displayFont,
+      bodyFont: bodyFont,
+    );
   }
 
   // Config save karo

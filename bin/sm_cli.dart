@@ -6,6 +6,7 @@ import 'package:sm_cli/commands/make_command.dart';
 import 'package:sm_cli/commands/remove_command.dart';
 import 'package:sm_cli/commands/ai_command.dart';
 import 'package:sm_cli/commands/ai_config_command.dart';
+import 'package:sm_cli/commands/ai_implement_command.dart';
 import 'package:sm_cli/services/config_service.dart';
 import 'package:sm_cli/services/prompt_service.dart';
 
@@ -45,7 +46,19 @@ void main(List<String> arguments) async {
   final aiConfigCommand = ArgParser()
     ..addFlag('list', negatable: false, help: 'List configured providers')
     ..addFlag('reset', negatable: false, help: 'Wipe all stored credentials');
-  final aiCommand = ArgParser()..addCommand('config', aiConfigCommand);
+  final aiImplementCommand = ArgParser()
+    ..addMultiOption('design',
+        help: 'Screenshot to rebuild the screen against (exactly one).');
+  final aiCommand = ArgParser()
+    ..addCommand('config', aiConfigCommand)
+    ..addCommand('implement', aiImplementCommand)
+    ..addMultiOption('design',
+        help: 'Local design file or directory (repeatable). '
+            'Sent to the AI as a reference and copied into <project>/design/.')
+    ..addOption('figma', help: 'Figma file key to render as reference frames')
+    ..addMultiOption('figma-node',
+        help: 'Specific Figma node IDs (repeatable). '
+            'Defaults to top-level frames of the first page.');
   parser.addCommand('ai', aiCommand);
 
   // HELP & VERSION
@@ -67,7 +80,7 @@ void main(List<String> arguments) async {
   }
 
   if (results['version'] == true) {
-    print('sm_cli version 1.0.7');
+    print('sm_cli version 1.0.21');
     return;
   }
 
@@ -255,13 +268,33 @@ void main(List<String> arguments) async {
       await runAiConfig(sub!);
       return;
     }
+    if (sub?.name == 'implement') {
+      if (sub!.rest.length < 2) {
+        print('❌ Usage: sm ai implement <project> <feature> '
+            '--design <path>');
+        return;
+      }
+      await runAiImplement(
+        projectName: sub.rest[0],
+        featureName: sub.rest[1],
+        designPaths: (sub['design'] as List).cast<String>(),
+      );
+      return;
+    }
     if (results.command!.rest.isEmpty) {
       print('❌ Please provide project name');
-      print('   Usage: sm ai <project_name>');
+      print('   Usage: sm ai <project_name> [--design <path>...] '
+          '[--figma <key>] [--figma-node <id>...]');
+      print('          sm ai implement <project> <feature> --design <path>');
       print('          sm ai config [--list|--reset]');
       return;
     }
-    await runAiInit(results.command!.rest.first);
+    await runAiInit(
+      results.command!.rest.first,
+      designPaths: (results.command!['design'] as List).cast<String>(),
+      figmaKey: results.command!['figma'] as String?,
+      figmaNodeIds: (results.command!['figma-node'] as List).cast<String>(),
+    );
   }
 
   else {
@@ -279,8 +312,15 @@ Usage:
   sm make api <project>                         Generate API layer (Dio)
   sm remove feature <project> <feature>         Remove a feature
   sm list <project>                             List all features
-  sm ai <project>                               AI-assisted project setup
+  sm ai <project> [options]                     AI-assisted project setup
+  sm ai implement <project> <feature>           Rebuild a screen from a design
+        --design <path>
   sm ai config [--list|--reset]                 Manage stored AI keys
+
+AI options:
+  --design <path>     Local image file or folder (repeatable)
+  --figma <key>       Figma file key — renders frames as references
+  --figma-node <id>   Specific Figma node IDs (repeatable)
 
 Flags for init:
   -r, --riverpod    Use Riverpod (default: interactive)
