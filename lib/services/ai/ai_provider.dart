@@ -266,6 +266,27 @@ Hard constraints (apply to every emitted file):
 - Do not add packages. Only use what is already imported plus
   `package:flutter/material.dart` and the project's own files.
 
+Design-only rewrite (CRITICAL):
+- This prompt rebuilds the UI. It is NOT a feature implementation.
+- Do NOT declare any new state-management class. Forbidden patterns
+  include `class X with ChangeNotifier`, `class X extends Cubit<...>`,
+  `class X extends Bloc<...>`, `class X extends GetxController`,
+  `class X extends StateNotifier<...>`, `class X extends Notifier<...>`,
+  `class X extends AsyncNotifier<...>`, and Riverpod
+  `ChangeNotifierProvider`/`StateNotifierProvider` declarations.
+- Do NOT include data-layer code: no API calls, no repositories, no
+  use cases, no model classes, no persistence. Render only.
+- If the existing screen file references an existing
+  Provider/Bloc/Cubit/Controller/Notifier, REFERENCE it (watch / build
+  with it). Don't redeclare it.
+- Purely visual, screen-local state MAY use a `StatefulWidget` with
+  `setState` (password obscurity toggle, tab index, carousel page,
+  expand/collapse). Use this sparingly and only when no external state
+  is involved.
+- For interactions you can't render without business logic (a submit
+  button, a network refresh), wire the callback to `() {}` and add a
+  single-line `// TODO: hook up <foo>`. Do not invent the logic.
+
 File-split rule (from the design skill):
 - Keep every emitted file under ~150 lines.
 - Extract focused, reusable widgets into the `widgets` array whenever
@@ -285,13 +306,26 @@ ${flutterFrontendSkill.body}
   }) {
     final smHint = switch (stateMgmt) {
       'Riverpod' =>
-        'State management: Riverpod. Prefer `ConsumerWidget` / `ConsumerStatefulWidget` and `ref.watch(...)`.',
+        'State management: Riverpod is already wired by the project. '
+            'If the existing screen reads a Notifier/Provider, watch it via '
+            '`ref.watch(...)`. Do NOT declare new providers, notifiers, or '
+            'AsyncNotifiers in this file.',
       'Bloc' =>
-        'State management: Bloc. Use `BlocBuilder<TheBloc, TheState>` and trigger events via `context.read<TheBloc>().add(...)`.',
+        'State management: Bloc is already wired by the project. If the '
+            'existing screen reads a Bloc/Cubit, render via '
+            '`BlocBuilder<TheBloc, TheState>`. Do NOT declare new Bloc or '
+            'Cubit classes in this file.',
       'GetX' =>
-        'State management: GetX. Use `GetView<TheController>` or `Obx(...)` and `controller.someRx`.',
+        'State management: GetX is already wired by the project. If the '
+            'existing screen uses a Controller, reference it via '
+            '`GetView<TheController>` or `Obx(...)`. Do NOT declare new '
+            '`GetxController` classes in this file.',
       _ =>
-        'State management: Provider. Use `Consumer<TheProvider>` or `context.watch<TheProvider>()`.',
+        'State management: Provider is already wired by the project. If '
+            'the existing screen consumes a ChangeNotifier, render via '
+            '`Consumer<TheProvider>` or `context.watch<TheProvider>()`. Do '
+            'NOT declare new `ChangeNotifier` classes in this file — purely '
+            'visual local state goes in a `StatefulWidget` + `setState`.',
     };
 
     return '''
