@@ -98,8 +98,8 @@
         <entry key="code_assets">
           <value>
             <list>
-              <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/code_assets-1.0.0/lib" />
               <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/code_assets-1.2.1/lib" />
+              <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/code_assets-1.0.0/lib" />
             </list>
           </value>
         </entry>
@@ -289,6 +289,7 @@
           <value>
             <list>
               <option value="$PROJECT_DIR$/../fvm/versions/3.41.5/packages/flutter/lib" />
+              <option value="$PROJECT_DIR$/../fvm/versions/3.44.1/packages/flutter/lib" />
             </list>
           </value>
         </entry>
@@ -317,6 +318,7 @@
           <value>
             <list>
               <option value="$PROJECT_DIR$/../fvm/versions/3.41.5/packages/flutter_test/lib" />
+              <option value="$PROJECT_DIR$/../fvm/versions/3.44.1/packages/flutter_test/lib" />
             </list>
           </value>
         </entry>
@@ -324,6 +326,7 @@
           <value>
             <list>
               <option value="$PROJECT_DIR$/../fvm/versions/3.41.5/packages/flutter_web_plugins/lib" />
+              <option value="$PROJECT_DIR$/../fvm/versions/3.44.1/packages/flutter_web_plugins/lib" />
             </list>
           </value>
         </entry>
@@ -365,8 +368,8 @@
         <entry key="hooks">
           <value>
             <list>
-              <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/hooks-1.0.2/lib" />
               <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/hooks-2.0.2/lib" />
+              <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/hooks-1.0.2/lib" />
             </list>
           </value>
         </entry>
@@ -515,8 +518,8 @@
           <value>
             <list>
               <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/meta-1.18.2/lib" />
-              <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/meta-1.18.0/lib" />
               <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/meta-1.17.0/lib" />
+              <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/meta-1.18.0/lib" />
             </list>
           </value>
         </entry>
@@ -783,6 +786,7 @@
           <value>
             <list>
               <option value="$PROJECT_DIR$/../fvm/versions/3.41.5/bin/cache/pkg/sky_engine/lib" />
+              <option value="$PROJECT_DIR$/../fvm/versions/3.44.1/bin/cache/pkg/sky_engine/lib" />
             </list>
           </value>
         </entry>
@@ -1209,6 +1213,10 @@
       <root url="file://$PROJECT_DIR$/../fvm/versions/3.41.5/packages/flutter/lib" />
       <root url="file://$PROJECT_DIR$/../fvm/versions/3.41.5/packages/flutter_test/lib" />
       <root url="file://$PROJECT_DIR$/../fvm/versions/3.41.5/packages/flutter_web_plugins/lib" />
+      <root url="file://$PROJECT_DIR$/../fvm/versions/3.44.1/bin/cache/pkg/sky_engine/lib" />
+      <root url="file://$PROJECT_DIR$/../fvm/versions/3.44.1/packages/flutter/lib" />
+      <root url="file://$PROJECT_DIR$/../fvm/versions/3.44.1/packages/flutter_test/lib" />
+      <root url="file://$PROJECT_DIR$/../fvm/versions/3.44.1/packages/flutter_web_plugins/lib" />
     </CLASSES>
     <JAVADOC />
     <SOURCES />
