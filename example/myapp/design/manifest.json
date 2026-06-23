@@ -1,0 +1,8 @@
+{
+  "features": {
+    "auth": "login.png",
+    "home": "home.png",
+    "profile": "profile.png"
+  },
+  "unmapped": []
+}

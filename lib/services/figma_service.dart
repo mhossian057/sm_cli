@@ -3,13 +3,23 @@ import 'package:http/http.dart' as http;
 
 import 'ai/design_asset.dart';
 
+/// One Figma node we plan to render: API id + human-readable frame name.
+class _FigmaNode {
+  final String id;
+  final String name;
+  _FigmaNode(this.id, this.name);
+}
+
 /// Renders frames from a Figma file as PNG `DesignAsset`s.
 ///
 /// Two-step flow:
 ///   1. If no node IDs are supplied, GET `/v1/files/<key>` and pick the
-///      top-level frames from the first page.
+///      top-level frames from the first page (with their names).
 ///   2. POST those node IDs to `/v1/images/<key>?ids=...&format=png` →
 ///      Figma returns S3 URLs we then download.
+///
+/// When the caller supplies explicit `nodeIds`, names are resolved via
+/// `/v1/files/<key>/nodes?ids=...` so the manifest stays human-readable.
 ///
 /// Auth is a Figma Personal Access Token (free on every Figma plan,
 /// generated from Account Settings → Personal access tokens) passed in
@@ -32,10 +42,14 @@ class FigmaService {
   }) async {
     // Users often paste node IDs straight from Figma URLs (`1-23`), but
     // the API wants colons (`1:23`). Normalize so either form works.
-    final ids = nodeIds.isNotEmpty
-        ? nodeIds.map((n) => n.replaceAll('-', ':')).toList()
+    final nodes = nodeIds.isNotEmpty
+        ? await _resolveNamesForIds(
+            fileKey: fileKey,
+            token: token,
+            ids: nodeIds.map((n) => n.replaceAll('-', ':')).toList(),
+          )
         : await _discoverTopLevelFrames(fileKey: fileKey, token: token);
-    if (ids.isEmpty) {
+    if (nodes.isEmpty) {
       throw Exception(
         'No renderable frames found in Figma file $fileKey.\n'
         'To target a specific node:\n'
@@ -46,10 +60,15 @@ class FigmaService {
       );
     }
 
+    // Dedupe sanitized names so two frames called "Login" don't collide
+    // on disk. Build once here so every batch sees a consistent map.
+    final nameById = _uniqueNames(nodes);
+
     final assets = <DesignAsset>[];
-    final totalBatches = (ids.length + _batchSize - 1) ~/ _batchSize;
-    for (var i = 0; i < ids.length; i += _batchSize) {
-      final batch = ids.sublist(i, (i + _batchSize).clamp(0, ids.length));
+    final totalBatches = (nodes.length + _batchSize - 1) ~/ _batchSize;
+    for (var i = 0; i < nodes.length; i += _batchSize) {
+      final batch =
+          nodes.sublist(i, (i + _batchSize).clamp(0, nodes.length));
       final batchNum = (i ~/ _batchSize) + 1;
       if (totalBatches > 1) {
         print('   Rendering batch $batchNum/$totalBatches '
@@ -58,12 +77,13 @@ class FigmaService {
       assets.addAll(await _renderBatch(
         fileKey: fileKey,
         token: token,
-        ids: batch,
+        nodes: batch,
+        nameById: nameById,
         scale: scale,
       ));
       // Small pause between batches keeps us under Figma's per-second
       // budget on multi-batch jobs. Skip on the last batch.
-      if (i + _batchSize < ids.length) {
+      if (i + _batchSize < nodes.length) {
         await Future<void>.delayed(const Duration(milliseconds: 800));
       }
     }
@@ -78,9 +98,11 @@ class FigmaService {
   static Future<List<DesignAsset>> _renderBatch({
     required String fileKey,
     required String token,
-    required List<String> ids,
+    required List<_FigmaNode> nodes,
+    required Map<String, String> nameById,
     required int scale,
   }) async {
+    final ids = nodes.map((n) => n.id).toList();
     final uri = Uri.parse('$_base/images/$fileKey').replace(queryParameters: {
       'ids': ids.join(','),
       'format': 'png',
@@ -130,19 +152,20 @@ class FigmaService {
     final images = (body['images'] as Map?)?.cast<String, dynamic>() ?? {};
 
     final assets = <DesignAsset>[];
-    for (final id in ids) {
-      final url = images[id] as String?;
+    for (final node in nodes) {
+      final url = images[node.id] as String?;
       if (url == null) continue;
       final png = await http.get(Uri.parse(url));
       if (png.statusCode != 200) {
         throw Exception(
-          'Figma PNG download for node $id failed (${png.statusCode})',
+          'Figma PNG download for node ${node.id} failed (${png.statusCode})',
         );
       }
       assets.add(DesignAsset(
         bytes: png.bodyBytes,
         mimeType: 'image/png',
-        label: 'figma_$id',
+        label: 'figma_${node.id}',
+        displayName: nameById[node.id] ?? node.name,
       ));
     }
     return assets;
@@ -150,7 +173,7 @@ class FigmaService {
 
   /// Pulls the file structure and returns every direct child of the
   /// first canvas (page). Keeps the request light — we don't recurse.
-  static Future<List<String>> _discoverTopLevelFrames({
+  static Future<List<_FigmaNode>> _discoverTopLevelFrames({
     required String fileKey,
     required String token,
   }) async {
@@ -173,11 +196,13 @@ class FigmaService {
     // duplicates of placed components, and a component set is a variant
     // collection rather than a screen.
     const renderable = {'FRAME', 'COMPONENT'};
-    final ids = <String>[];
+    final nodes = <_FigmaNode>[];
     void walk(Map node) {
       final type = node['type'];
       if (renderable.contains(type)) {
-        ids.add(node['id'] as String);
+        final id = node['id'] as String;
+        final name = (node['name'] as String?)?.trim();
+        nodes.add(_FigmaNode(id, name == null || name.isEmpty ? id : name));
         return; // don't descend into a frame's children
       }
       final kids = node['children'];
@@ -195,6 +220,61 @@ class FigmaService {
         }
       }
     }
-    return ids;
+    return nodes;
+  }
+
+  /// Look up names for user-supplied node IDs via `/v1/files/<key>/nodes`.
+  /// Falls back to the ID as the name when the lookup fails or returns
+  /// nothing — rendering should never be blocked by a name fetch.
+  static Future<List<_FigmaNode>> _resolveNamesForIds({
+    required String fileKey,
+    required String token,
+    required List<String> ids,
+  }) async {
+    try {
+      final uri = Uri.parse('$_base/files/$fileKey/nodes').replace(
+        queryParameters: {'ids': ids.join(',')},
+      );
+      final res = await http.get(uri, headers: {'X-Figma-Token': token});
+      if (res.statusCode != 200) {
+        return [for (final id in ids) _FigmaNode(id, id)];
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final nodes = (body['nodes'] as Map?)?.cast<String, dynamic>() ?? {};
+      return [
+        for (final id in ids)
+          _FigmaNode(
+            id,
+            ((nodes[id] as Map?)?['document'] as Map?)?['name'] as String? ??
+                id,
+          ),
+      ];
+    } catch (_) {
+      return [for (final id in ids) _FigmaNode(id, id)];
+    }
+  }
+
+  /// Sanitize frame names to snake_case filenames and dedupe collisions
+  /// with `_2`, `_3`, ... suffixes. Returns id → unique stem.
+  static Map<String, String> _uniqueNames(List<_FigmaNode> nodes) {
+    final used = <String>{};
+    final out = <String, String>{};
+    for (final n in nodes) {
+      var stem = n.name
+          .trim()
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+          .replaceAll(RegExp(r'^_+|_+$'), '');
+      if (stem.isEmpty) stem = 'frame_${n.id.replaceAll(':', '_')}';
+      var unique = stem;
+      var i = 2;
+      while (used.contains(unique)) {
+        unique = '${stem}_$i';
+        i++;
+      }
+      used.add(unique);
+      out[n.id] = unique;
+    }
+    return out;
   }
 }

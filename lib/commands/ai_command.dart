@@ -1,10 +1,13 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:interact/interact.dart';
 
 import '../services/prompt_service.dart';
 import '../services/ai/ai_provider.dart';
 import '../services/ai/credential_service.dart';
+import '../services/config_service.dart';
 import '../services/figma_service.dart';
+import 'ai_implement_command.dart';
 import 'init_command.dart';
 import 'make_command.dart';
 
@@ -34,11 +37,15 @@ Future<void> runAiInit(
   List<String> designPaths = const [],
   String? figmaKey,
   List<String> figmaNodeIds = const [],
+  bool autoImplement = false,
 }) async {
-  if (Directory('$projectName/lib').existsSync()) {
-    print('⚠️ Project "$projectName" already exists.');
-    print('   Use `sm make feature $projectName <name>` to add to it.');
-    return;
+  // Project may already exist — in that case we augment it: skip
+  // initProject (don't overwrite theme), reuse the persisted state-mgmt
+  // choice, and let generateFeature dedupe per-feature.
+  final projectExists = Directory('$projectName/lib').existsSync();
+  if (projectExists) {
+    print('📂 Project "$projectName" already exists — augmenting in place '
+        '(theme & existing features preserved).');
   }
 
   // ---- provider + key ----
@@ -75,6 +82,15 @@ Future<void> runAiInit(
         '${assets.map((a) => a.label).join(', ')}');
   }
 
+  // Optional user-supplied mapping. When present it overrides whatever
+  // the AI would have inferred and seeds features that the AI didn't
+  // pick — the user's intent always wins.
+  final userManifest = _loadDesignManifest(designPaths);
+  if (userManifest != null) {
+    print('📝 Loaded ${userManifest.features.length} feature mapping(s) '
+        'from ${userManifest.sourcePath}');
+  }
+
   // Cluster + cap into representatives, then split into API-sized
   // batches. Each batch becomes one plan call; results are merged.
   final reps = _selectRepresentatives(assets);
@@ -84,7 +100,14 @@ Future<void> runAiInit(
   final scale = selectProjectScale();
   final budget = selectProjectBudget();
   final featuresBrief = askFeaturesBrief();
-  final sm = selectStateManagement();
+  // State management is fixed for existing projects (already wired into
+  // pubspec + main.dart) — read from .sm_cli_config instead of asking.
+  final sm = projectExists
+      ? ConfigService.readStateManagement(projectName)
+      : selectStateManagement();
+  if (projectExists) {
+    print('🧭 State management: $sm (from $projectName/.sm_cli_config)');
+  }
   final designBrief = askDesignBrief();
 
   // ---- plan (one pass when no images or fits in one call, multi-pass
@@ -142,27 +165,107 @@ Future<void> runAiInit(
     print('🔐 Saved $label key to ${CredentialService.path}');
   }
 
+  // Seed the plan with any user-mapped features the AI didn't pick so
+  // they get scaffolded. Done before the empty-features bail-out so a
+  // manifest-only run (e.g. AI returned `[]`) can still succeed.
+  if (userManifest != null) {
+    final extras = userManifest.features.keys
+        .where((f) => !plan.features.contains(f))
+        .toList();
+    if (extras.isNotEmpty) {
+      plan = ProjectPlan(
+        features: [...plan.features, ...extras],
+        extraPackages: plan.extraPackages,
+        themeMode: plan.themeMode,
+        seedColorHex: plan.seedColorHex,
+        visualLanguage: plan.visualLanguage,
+        displayFont: plan.displayFont,
+        bodyFont: plan.bodyFont,
+        featureToDesign: plan.featureToDesign,
+      );
+    }
+  }
+
   if (plan.features.isEmpty) {
     print('❌ AI returned no valid features.');
     print('   Try describing the features more concretely.');
     return;
   }
 
+  // Resolve the feature → design mapping. User manifest wins outright;
+  // otherwise use the AI's pick, dropping entries whose filenames don't
+  // match any attached asset (the AI occasionally invents filenames).
+  final Map<String, String> mapping;
+  final bool mappingFromUser = userManifest != null;
+  int droppedMappings;
+  if (mappingFromUser) {
+    mapping = _resolveManifestAgainstAssets(
+      userMapping: userManifest.features,
+      assets: assets,
+      sourcePath: userManifest.sourcePath,
+    );
+    droppedMappings = userManifest.features.length - mapping.length;
+  } else {
+    final validFilenames = assets.map((a) => a.savedFilename).toSet();
+    final m = <String, String>{};
+    plan.featureToDesign.forEach((feature, design) {
+      if (validFilenames.contains(design)) m[feature] = design;
+    });
+    mapping = m;
+    droppedMappings = plan.featureToDesign.length - mapping.length;
+  }
+
   // ---- confirm before writing anything to disk ----
   print('\n📋 Proposed plan');
   print('   Provider   : $label ($model)');
+  print('   Mode       : ${projectExists ? "augment existing project" : "new project"}');
   print('   State mgmt : $sm');
-  print('   Features   : ${plan.features.join(', ')}');
-  print('   Theme      : ${plan.themeMode}, seed ${plan.seedColorHex}');
-  if (plan.visualLanguage.isNotEmpty) {
-    print('   Aesthetic  : ${plan.visualLanguage}');
+  if (projectExists) {
+    final newOnes = plan.features
+        .where((f) =>
+            !Directory('$projectName/lib/features/$f').existsSync())
+        .toList();
+    final existing = plan.features
+        .where((f) =>
+            Directory('$projectName/lib/features/$f').existsSync())
+        .toList();
+    print('   Features   :');
+    if (newOnes.isNotEmpty) print('     + new      : ${newOnes.join(', ')}');
+    if (existing.isNotEmpty) print('     • existing : ${existing.join(', ')}');
+  } else {
+    print('   Features   : ${plan.features.join(', ')}');
+    print('   Theme      : ${plan.themeMode}, seed ${plan.seedColorHex}');
+    if (plan.visualLanguage.isNotEmpty) {
+      print('   Aesthetic  : ${plan.visualLanguage}');
+    }
+    print('   Fonts      : ${plan.displayFont} (display) / ${plan.bodyFont} (body)');
   }
-  print('   Fonts      : ${plan.displayFont} (display) / ${plan.bodyFont} (body)');
   if (plan.extraPackages.isNotEmpty) {
     print('   Extra deps : ${plan.extraPackages.join(', ')}');
   }
   if (assets.isNotEmpty) {
     print('   Designs    : ${assets.length} image(s) → $projectName/design/');
+  }
+  if (mapping.isNotEmpty) {
+    print('   Mapping    :'
+        '${mappingFromUser ? ' (from ${userManifest.sourcePath})' : ''}');
+    final unmapped = plan.features.where((f) => !mapping.containsKey(f));
+    for (final feature in plan.features) {
+      final d = mapping[feature];
+      print('     • $feature${d == null ? ' → (no design)' : ' → $d'}');
+    }
+    if (unmapped.isNotEmpty && autoImplement) {
+      print('   (unmapped features will be scaffolded but not implemented)');
+    }
+  }
+  if (droppedMappings > 0) {
+    final source = mappingFromUser ? 'manifest.json' : 'AI';
+    print('   ⚠️  Dropped $droppedMappings mapping entr(y/ies) — $source '
+        'returned filenames that don\'t match attached designs.');
+  }
+  if (autoImplement) {
+    print('   Auto-implement: ${mapping.length} feature(s) will be '
+        'rebuilt from their designs after scaffold.');
   }
   print('');
 
@@ -174,18 +277,20 @@ Future<void> runAiInit(
   }
 
   // ---- generate ----
-  await initProject(
-    projectName: projectName,
-    riverpod: sm == 'Riverpod',
-    bloc: sm == 'Bloc',
-    getx: sm == 'GetX',
-    useGoRouter: true,
-    useTheme: true,
-    themeMode: plan.themeMode,
-    seedColorHex: plan.seedColorHex,
-    displayFont: plan.displayFont,
-    bodyFont: plan.bodyFont,
-  );
+  if (!projectExists) {
+    await initProject(
+      projectName: projectName,
+      riverpod: sm == 'Riverpod',
+      bloc: sm == 'Bloc',
+      getx: sm == 'GetX',
+      useGoRouter: true,
+      useTheme: true,
+      themeMode: plan.themeMode,
+      seedColorHex: plan.seedColorHex,
+      displayFont: plan.displayFont,
+      bodyFont: plan.bodyFont,
+    );
+  }
 
   for (final feature in plan.features) {
     await makeFeature(projectName: projectName, featureName: feature);
@@ -213,10 +318,63 @@ Future<void> runAiInit(
       File('${designDir.path}/${a.savedFilename}').writeAsBytesSync(a.bytes);
     }
     print('🖼️  Saved ${assets.length} design file(s) to $projectName/design/');
+
+    // ---- write the feature→design manifest ----
+    // Records the AI's mapping plus any designs that weren't claimed by a
+    // feature, so downstream tooling (and humans) can see provenance.
+    final unmappedDesigns = assets
+        .map((a) => a.savedFilename)
+        .toSet()
+        .difference(mapping.values.toSet())
+        .toList()
+      ..sort();
+    final manifest = <String, dynamic>{
+      'features': mapping,
+      'unmapped': unmappedDesigns,
+    };
+    File('$projectName/design/manifest.json').writeAsStringSync(
+      const JsonEncoder.withIndent('  ').convert(manifest),
+    );
+    print('📝 Wrote $projectName/design/manifest.json');
   }
 
   print('\n✅ AI-generated project "$projectName" ready '
       'with ${plan.features.length} feature(s).');
+
+  // ---- optional: auto-implement every mapped feature ----
+  if (autoImplement && mapping.isNotEmpty) {
+    print('\n🤖 Auto-implementing ${mapping.length} feature(s) from '
+        'their designs...');
+    final succeeded = <String>[];
+    final failed = <String, String>{};
+    for (final entry in mapping.entries) {
+      final feature = entry.key;
+      final designPath = '$projectName/design/${entry.value}';
+      print('\n── $feature ← ${entry.value} ──');
+      try {
+        await runAiImplement(
+          projectName: projectName,
+          featureName: feature,
+          designPaths: [designPath],
+          confirm: false,
+        );
+        succeeded.add(feature);
+      } catch (e) {
+        failed[feature] = e.toString().split('\n').first;
+        print('❌ Failed to implement "$feature": ${failed[feature]}');
+      }
+    }
+    print('\n📊 Auto-implement summary');
+    print('   ✅ ${succeeded.length} implemented'
+        '${succeeded.isEmpty ? '' : ': ${succeeded.join(', ')}'}');
+    if (failed.isNotEmpty) {
+      print('   ❌ ${failed.length} failed:');
+      failed.forEach((f, err) => print('     • $f: $err'));
+      print('   Retry individually with:  sm ai implement $projectName '
+          '<feature> --design design/<file>');
+    }
+  }
+
   print('   cd $projectName && flutter run');
 }
 
@@ -387,12 +545,96 @@ List<List<DesignAsset>> _chunkForPasses(List<DesignAsset> reps) {
   return batches;
 }
 
+/// Result of scanning `--design <dir>` paths for a user-supplied
+/// `manifest.json` describing the feature → design mapping.
+class _DesignManifest {
+  final Map<String, String> features;
+  final String sourcePath; // for display ("from designs/manifest.json")
+  _DesignManifest({required this.features, required this.sourcePath});
+}
+
+/// Look for `manifest.json` inside any directory passed via `--design`.
+/// Schema: `{"features": {"<feature>": "<filename>"}}`. Returns the
+/// merged mapping (later dirs win on collision) or null when no manifest
+/// is found. Feature names that don't match the snake_case regex are
+/// dropped with a warning; we never error here so a malformed manifest
+/// can't block a run.
+_DesignManifest? _loadDesignManifest(List<String> paths) {
+  final valid = RegExp(r'^[a-z][a-z0-9_]*$');
+  final merged = <String, String>{};
+  final sources = <String>[];
+  for (final raw in paths) {
+    if (FileSystemEntity.typeSync(raw) != FileSystemEntityType.directory) {
+      continue;
+    }
+    final file = File('$raw/manifest.json');
+    if (!file.existsSync()) continue;
+    sources.add(file.path);
+    try {
+      final body = jsonDecode(file.readAsStringSync());
+      final featuresRaw = (body is Map ? body['features'] : null);
+      if (featuresRaw is! Map) {
+        print('⚠️  ${file.path}: missing or invalid `features` map. Ignored.');
+        continue;
+      }
+      featuresRaw.forEach((k, v) {
+        if (k is! String || v is! String) return;
+        final feature = k.trim();
+        if (!valid.hasMatch(feature)) {
+          print('⚠️  ${file.path}: skipping invalid feature name "$feature" '
+              '(must be snake_case, ^[a-z][a-z0-9_]*\$).');
+          return;
+        }
+        merged[feature] = v.trim();
+      });
+    } catch (e) {
+      print('⚠️  ${file.path}: could not parse ($e). Ignored.');
+    }
+  }
+  if (merged.isEmpty) return null;
+  return _DesignManifest(features: merged, sourcePath: sources.join(', '));
+}
+
+/// Resolve user-supplied filenames to actual `DesignAsset`s. Accepts
+/// either the original filename (`Login Screen.png`) or the sanitized
+/// `savedFilename` (`login_screen.png`) so users can write the manifest
+/// either way. Returns the resolved mapping keyed by feature name with
+/// values normalized to `savedFilename` (what auto-implement reads from
+/// disk). Drops entries that can't be matched and warns per drop.
+Map<String, String> _resolveManifestAgainstAssets({
+  required Map<String, String> userMapping,
+  required List<DesignAsset> assets,
+  required String sourcePath,
+}) {
+  String normalize(String s) =>
+      s.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+  final byLabel = {for (final a in assets) a.label.toLowerCase(): a};
+  final bySaved = {for (final a in assets) a.savedFilename: a};
+  final byNorm = {for (final a in assets) normalize(a.label): a};
+
+  final resolved = <String, String>{};
+  userMapping.forEach((feature, filename) {
+    final hit = byLabel[filename.toLowerCase()] ??
+        bySaved[filename] ??
+        byNorm[normalize(filename)];
+    if (hit == null) {
+      print('⚠️  $sourcePath: "$feature" → "$filename" — no matching design '
+          'file in --design paths. Skipped.');
+      return;
+    }
+    resolved[feature] = hit.savedFilename;
+  });
+  return resolved;
+}
+
 /// Merge feature/package lists from multi-pass planning. The first
 /// pass's theme tokens win — they're usually consistent across passes
-/// and the alternative (averaging) produces muddy colors.
+/// and the alternative (averaging) produces muddy colors. Mappings
+/// union; collisions keep the first pass's pick.
 ProjectPlan _mergePlans(ProjectPlan a, ProjectPlan b) {
   final features = <String>{...a.features, ...b.features}.toList();
   final packages = <String>{...a.extraPackages, ...b.extraPackages}.toList();
+  final mapping = <String, String>{...b.featureToDesign, ...a.featureToDesign};
   return ProjectPlan(
     features: features,
     extraPackages: packages,
@@ -401,5 +643,6 @@ ProjectPlan _mergePlans(ProjectPlan a, ProjectPlan b) {
     visualLanguage: a.visualLanguage,
     displayFont: a.displayFont,
     bodyFont: a.bodyFont,
+    featureToDesign: mapping,
   );
 }

@@ -22,6 +22,7 @@ Future<void> runAiImplement({
   required String projectName,
   required String featureName,
   required List<String> designPaths,
+  bool confirm = true,
 }) async {
   final screenFile = File(
     '$projectName/lib/features/$featureName/presentation/screens/${featureName}_screen.dart',
@@ -115,13 +116,15 @@ Future<void> runAiImplement({
   print('   Design   : ${designFile.path}');
   print('   State    : $stateMgmt');
   print('');
-  final go = Confirm(
-    prompt: 'Overwrite the screen file with AI-generated code?',
-    defaultValue: true,
-  ).interact();
-  if (!go) {
-    print('Aborted. Nothing was written.');
-    return;
+  if (confirm) {
+    final go = Confirm(
+      prompt: 'Overwrite the screen file with AI-generated code?',
+      defaultValue: true,
+    ).interact();
+    if (!go) {
+      print('Aborted. Nothing was written.');
+      return;
+    }
   }
 
   // ---- generate ----

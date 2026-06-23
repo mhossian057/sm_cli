@@ -1,8 +1,14 @@
 # Using Figma with `sm ai`
 
 `sm ai my_app --figma <file_key>` lets the AI planner read directly from
-your Figma file: it renders frames as PNGs, sends them as multimodal
-references, and infers features / theme tokens / fonts from the pixels.
+your Figma file: it renders frames as PNGs (named after the frames in
+Figma), sends them as multimodal references, and infers features / theme
+tokens / fonts from the pixels. The planner also returns a
+`feature → design.png` map, which is written to `<project>/design/manifest.json`.
+
+Add `--auto-implement` to chain a second step: after scaffolding, `sm`
+loops over the mapping and calls `sm ai implement` for every paired
+feature so each screen is rebuilt from its design without further input.
 
 Same effect can be achieved by exporting PNGs from Figma manually and
 passing `--design <folder>`. **For most users that's the better path** —
@@ -171,13 +177,154 @@ sm ai my_app --figma 3EjicvlHjJkMDnCeQGcoMY --design ~/inspiration/dribbble_card
 ### Implementing a single screen from a Figma frame
 
 `sm ai implement` only accepts local files — there's no `--figma` shortcut
-because the API quota is too tight for casual re-runs. Export the frame
-to PNG first, then implement:
+because the API quota is too tight for casual re-runs. The good news:
+after a `sm ai my_app --figma <key>` run, every rendered frame is already
+saved into `<project>/design/` with a human-readable name derived from
+the Figma frame (e.g. `login_screen.png`). Use those directly:
+
+```bash
+sm ai implement my_app auth --design my_app/design/login_screen.png
+```
+
+If you'd rather re-export from Figma manually:
 
 ```bash
 # In Figma: select the frame, Cmd+Shift+E → PNG → save to my_app/design/login.png
 sm ai implement my_app auth --design my_app/design/login.png
 ```
+
+### Auto-implement every mapped feature in one shot
+
+```bash
+sm ai my_app --figma 3EjicvlHjJkMDnCeQGcoMY --auto-implement
+```
+
+After the project is scaffolded, `sm` walks `design/manifest.json` and
+calls `sm ai implement` for every `feature → design` pair. Behavior:
+
+- **Per-feature confirmation is skipped** (you already confirmed at the
+  start). Each call still backs up the original screen to `<file>.bak`.
+- **Continue on failure.** A failed feature does not stop the loop. At
+  the end you get a summary: `✅ N implemented, ❌ M failed (auth: …)`.
+- **Retry individual failures manually**:
+  ```bash
+  sm ai implement my_app auth --design design/login_screen.png
+  ```
+- **Cost.** Each mapped feature triggers one additional AI vision call.
+  A 5-feature project ≈ 1 plan call + 5 implement calls. Expect minutes
+  and noticeably higher token spend — gate behind `--auto-implement` so
+  the plain `--figma` path stays cheap.
+- **Unmapped features.** Features the AI added from the brief (no
+  matching design) are scaffolded as stubs and **skipped** by the loop.
+  They appear in the `Mapping:` block of the confirmation screen as
+  `<feature> → (no design)`.
+
+---
+
+## What lands in `<project>/design/`
+
+Every `--figma` run writes a `design/` folder containing the rendered
+PNGs plus a `manifest.json`. Example for a 4-feature plan with 5 frames
+attached:
+
+```
+my_app/design/
+  manifest.json
+  login_screen.png      ← frame named "Login Screen" in Figma
+  signup.png            ← frame named "Signup" in Figma
+  home_feed.png
+  user_profile.png
+  settings.png
+```
+
+### Filename rules
+
+- Frame names are sanitized to snake_case: `Login Screen` →
+  `login_screen.png`.
+- Collisions are deduped with `_2`, `_3` suffixes (`login_screen.png`,
+  `login_screen_2.png`, …).
+- If a frame is unnamed in Figma, the file falls back to
+  `frame_<node_id>.png`.
+- When you pass `--figma-node` explicitly, `sm` queries Figma for each
+  node's name so filenames stay readable even for hand-picked frames.
+
+### `manifest.json` shape
+
+```json
+{
+  "features": {
+    "auth": "login_screen.png",
+    "feed": "home_feed.png",
+    "profile": "user_profile.png"
+  },
+  "unmapped": ["signup.png", "settings.png"]
+}
+```
+
+- `features` — the AI's `feature → design.png` mapping. Drives the
+  `--auto-implement` loop. Empty `{}` if no designs were attached or the
+  AI returned no mapping.
+- `unmapped` — designs that landed on disk for provenance but weren't
+  paired with a feature (e.g. duplicate screens, secondary variants, or
+  frames the AI grouped under one feature).
+
+The manifest is regenerated on every `sm ai --figma` run; edit it by
+hand if you want to remap a feature to a different frame before
+re-running `sm ai implement`.
+
+### Pre-supplying your own mapping (`--design <dir>` + `manifest.json`)
+
+You can skip the AI's auto-mapping by dropping a `manifest.json` inside
+any `--design` directory. When present, the user mapping is treated as
+authoritative — the AI still picks theme/fonts/aesthetic but its
+`feature_to_design` output is discarded, and any feature in your manifest
+that the AI didn't pick is added to the scaffold so it gets generated.
+
+Example layout (no Figma needed):
+
+```
+designs/
+  manifest.json
+  Login Screen.png
+  Home Feed.png
+  Profile.png
+```
+
+```json
+// designs/manifest.json
+{
+  "features": {
+    "auth": "Login Screen.png",
+    "feed": "Home Feed.png",
+    "profile": "Profile.png"
+  }
+}
+```
+
+```bash
+sm ai my_app --design ./designs --auto-implement
+```
+
+What the run does:
+1. Loads the three PNGs as references and shows the AI all of them for
+   theme/font selection.
+2. Reads `designs/manifest.json` and prints
+   `📝 Loaded 3 feature mapping(s) from designs/manifest.json`.
+3. Confirms with `Mapping (from designs/manifest.json):` so it's
+   obvious the AI's pick was replaced.
+4. Scaffolds `auth`, `feed`, `profile` even if the AI's plan didn't
+   include them.
+5. Auto-implements each one from its paired design.
+
+Filename matching is forgiving — the manifest can reference either the
+original filename (`Login Screen.png`), the sanitized form
+(`login_screen.png`), or any case-variant. Entries with no matching
+file are dropped with a warning but never fatal.
+
+Manifests in multiple `--design` directories are merged (later wins on
+collision). Combining with `--figma` is allowed: the manifest overrides
+mapping for files it names; figma frames not claimed by the manifest
+land in `unmapped` and are saved for provenance only.
 
 ---
 
@@ -188,6 +335,7 @@ sm ai implement my_app auth --design my_app/design/login.png
 | `--figma <key>` | no | Figma file key (from the URL after `/design/`). |
 | `--figma-node <id>` | yes | Specific frame(s) to render. Dash or colon form both accepted. Omit to auto-discover all screens. |
 | `--design <path>` | yes | Local PNG/JPG/JPEG/WEBP file, folder, or comma-separated list. Can be combined with `--figma`. |
+| `--auto-implement` | no | After scaffolding, run `sm ai implement` for every feature paired with a design in the manifest. Continues on per-feature failure and prints a summary. |
 
 ---
 

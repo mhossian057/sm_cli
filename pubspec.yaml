@@ -27,6 +27,12 @@ dependencies:
   io: ^1.0.5
   interact: ^2.2.0
   http: ^1.2.0
+  go_router: ^17.3.0
+  flutter_bloc: ^9.1.1
+  equatable: ^2.0.8
+  dio: ^5.9.2
+  google_fonts: ^8.1.0
+  shared_preferences: ^2.5.5
 
 dev_dependencies:
   lints: ^6.0.0

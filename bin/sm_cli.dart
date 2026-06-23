@@ -58,7 +58,11 @@ void main(List<String> arguments) async {
     ..addOption('figma', help: 'Figma file key to render as reference frames')
     ..addMultiOption('figma-node',
         help: 'Specific Figma node IDs (repeatable). '
-            'Defaults to top-level frames of the first page.');
+            'Defaults to top-level frames of the first page.')
+    ..addFlag('auto-implement',
+        negatable: false,
+        help: 'After scaffolding, run `ai implement` for every '
+            'feature mapped to a design.');
   parser.addCommand('ai', aiCommand);
 
   // HELP & VERSION
@@ -294,6 +298,7 @@ void main(List<String> arguments) async {
       designPaths: (results.command!['design'] as List).cast<String>(),
       figmaKey: results.command!['figma'] as String?,
       figmaNodeIds: (results.command!['figma-node'] as List).cast<String>(),
+      autoImplement: results.command!['auto-implement'] as bool,
     );
   }
 
@@ -321,6 +326,7 @@ AI options:
   --design <path>     Local image file or folder (repeatable)
   --figma <key>       Figma file key — renders frames as references
   --figma-node <id>   Specific Figma node IDs (repeatable)
+  --auto-implement    Run `ai implement` for every feature-mapped design
 
 Flags for init:
   -r, --riverpod    Use Riverpod (default: interactive)

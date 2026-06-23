@@ -11,6 +11,11 @@ export 'design_asset.dart';
 
 /// AI-generated scaffolding plan. Maps onto the existing generators:
 /// `features` → `generateFeature`, `extraPackages` → `flutter pub add`.
+///
+/// [featureToDesign] pairs each feature with the saved filename of the
+/// reference design that drove its inclusion (e.g. `auth → login.png`).
+/// Drives the `--auto-implement` loop and the `design/manifest.json`.
+/// Empty when no images were attached.
 class ProjectPlan {
   final List<String> features;
   final List<String> extraPackages;
@@ -19,6 +24,7 @@ class ProjectPlan {
   final String visualLanguage;  // free-form, e.g. 'brutalist', 'editorial'
   final String displayFont;     // google_fonts family for display
   final String bodyFont;        // google_fonts family for body
+  final Map<String, String> featureToDesign;
 
   ProjectPlan({
     required this.features,
@@ -28,9 +34,19 @@ class ProjectPlan {
     required this.visualLanguage,
     required this.displayFont,
     required this.bodyFont,
+    this.featureToDesign = const {},
   });
 
   factory ProjectPlan.fromJson(Map<String, dynamic> j) {
+    final rawMap = j['feature_to_design'];
+    final map = <String, String>{};
+    if (rawMap is Map) {
+      rawMap.forEach((k, v) {
+        if (k is String && v is String && k.isNotEmpty && v.isNotEmpty) {
+          map[k] = v;
+        }
+      });
+    }
     return ProjectPlan(
       features: (j['features'] as List? ?? const []).cast<String>(),
       extraPackages: (j['extra_packages'] as List? ?? const []).cast<String>(),
@@ -39,6 +55,7 @@ class ProjectPlan {
       visualLanguage: j['visual_language'] as String? ?? '',
       displayFont: j['display_font'] as String? ?? 'Inter',
       bodyFont: j['body_font'] as String? ?? 'Inter',
+      featureToDesign: map,
     );
   }
 }
@@ -150,7 +167,10 @@ class PlanPromptBuilder {
         ? ''
         : '''
 
-Reference designs attached (${assets.length}): ${assets.map((a) => a.label).join(', ')}.
+Reference designs attached (${assets.length}), each labeled by the
+filename it will be saved as inside `<project>/design/`:
+${assets.map((a) => '  - ${a.savedFilename}').join('\n')}
+
 Analyze every attached image. Derive `visual_language`, `seed_color`,
 `display_font`, and `body_font` directly from what you see.
 
@@ -160,6 +180,17 @@ Feature selection — designs are primary, the brief is additive:
 - ALSO include any features named in the brief above, even if no
   screen shows them yet (they will be scaffolded as stubs).
 - Do NOT invent features absent from both the designs and the brief.
+
+Feature → design mapping (REQUIRED when designs are attached):
+- Populate `feature_to_design` as a JSON object mapping each
+  design-derived feature name to the EXACT filename listed above
+  (e.g. {"auth": "login.png", "feed": "home_feed.png"}).
+- One design maps to AT MOST one feature. If multiple frames clearly
+  belong to the same feature, pick the most representative one.
+- Features added only from the brief (no screen) MUST NOT appear in
+  the mapping — leave them out.
+- Use the filenames verbatim, including extension. Do not invent
+  filenames that aren't in the list.
 ''';
 
     return '''
@@ -184,13 +215,19 @@ Return EXACTLY this JSON shape (no extra keys, no markdown):
   "seed_color": "#RRGGBB",
   "visual_language": "editorial",
   "display_font": "Fraunces",
-  "body_font": "Inter"
+  "body_font": "Inter",
+  "feature_to_design": {"auth": "login.png", "home": "home_feed.png"}
 }
+
+Omit `feature_to_design` (or return `{}`) when no designs were attached.
 ''';
   }
 
   /// Strip ```json fences, parse, and filter features through the same
   /// regex `generateFeature` uses so invalid names never reach disk.
+  /// Drops any `feature_to_design` entry whose feature didn't survive
+  /// validation; asset-filename validation happens in the caller (which
+  /// knows the attached design list).
   static ProjectPlan parse(String text) {
     final cleaned = text.replaceAll(RegExp(r'```json|```'), '').trim();
     final parsed = jsonDecode(cleaned) as Map<String, dynamic>;
@@ -202,6 +239,10 @@ Return EXACTLY this JSON shape (no extra keys, no markdown):
       final n = f.trim();
       if (valid.hasMatch(n) && !safe.contains(n)) safe.add(n);
     }
+    final safeMap = <String, String>{};
+    raw.featureToDesign.forEach((feature, design) {
+      if (safe.contains(feature)) safeMap[feature] = design;
+    });
     return ProjectPlan(
       features: safe,
       extraPackages: raw.extraPackages,
@@ -210,6 +251,7 @@ Return EXACTLY this JSON shape (no extra keys, no markdown):
       visualLanguage: raw.visualLanguage,
       displayFont: raw.displayFont,
       bodyFont: raw.bodyFont,
+      featureToDesign: safeMap,
     );
   }
 }
