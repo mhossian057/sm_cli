@@ -42,6 +42,20 @@ Future<void> runAiInit(
   // Project may already exist — in that case we augment it: skip
   // initProject (don't overwrite theme), reuse the persisted state-mgmt
   // choice, and let generateFeature dedupe per-feature.
+  //
+  // All downstream code (generators, makeFeature, runAiImplement) joins
+  // paths as `$projectName/lib/...`. When the user runs from *inside* the
+  // project directory, that resolves to `myapp2/myapp2/lib` and breaks.
+  // Detect that case and step up to the parent so the rest of the flow
+  // works unchanged.
+  final cwdName =
+      Directory.current.path.split(Platform.pathSeparator).last;
+  if (cwdName == projectName &&
+      Directory('lib').existsSync() &&
+      !Directory('$projectName/lib').existsSync()) {
+    print('📂 Detected you are inside "$projectName" — running from parent.');
+    Directory.current = Directory.current.parent;
+  }
   final projectExists = Directory('$projectName/lib').existsSync();
   if (projectExists) {
     print('📂 Project "$projectName" already exists — augmenting in place '
@@ -97,18 +111,32 @@ Future<void> runAiInit(
   final batches = _chunkForPasses(reps);
 
   // ---- questionnaire ----
-  final scale = selectProjectScale();
-  final budget = selectProjectBudget();
-  final featuresBrief = askFeaturesBrief();
-  // State management is fixed for existing projects (already wired into
-  // pubspec + main.dart) — read from .sm_cli_config instead of asking.
-  final sm = projectExists
-      ? ConfigService.readStateManagement(projectName)
-      : selectStateManagement();
+  // For existing projects we skip scale/budget/features/design questions —
+  // they're framing for planning a *new* project. When augmenting, the
+  // attached designs + existing feature list are enough context for the AI.
+  // State mgmt is always read from .sm_cli_config (it's already wired into
+  // pubspec + main.dart and can't be changed mid-project).
+  final String scale;
+  final String budget;
+  final String featuresBrief;
+  final String sm;
+  final String designBrief;
   if (projectExists) {
+    scale = 'medium';
+    budget = 'medium';
+    featuresBrief = '';
+    designBrief = '';
+    sm = ConfigService.readStateManagement(projectName);
     print('🧭 State management: $sm (from $projectName/.sm_cli_config)');
+    print('⏭️  Skipping new-project questions (scale, budget, features, '
+        'design brief) — augmenting existing project.');
+  } else {
+    scale = selectProjectScale();
+    budget = selectProjectBudget();
+    featuresBrief = askFeaturesBrief();
+    sm = selectStateManagement();
+    designBrief = askDesignBrief();
   }
-  final designBrief = askDesignBrief();
 
   // ---- plan (one pass when no images or fits in one call, multi-pass
   // when there are more representatives than fit one API request) ----
