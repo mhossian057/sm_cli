@@ -402,5 +402,8 @@ void addRouteConstant({
 }
 
 String capitalize(String text) {
-  return text[0].toUpperCase() + text.substring(1);
+  return text
+      .split('_')
+      .map((p) => p.isEmpty ? '' : p[0].toUpperCase() + p.substring(1))
+      .join();
 }

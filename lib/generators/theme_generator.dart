@@ -95,10 +95,9 @@ String _fontMethod(String family) {
       .where((p) => p.isNotEmpty)
       .toList();
   if (parts.isEmpty) return 'inter';
-  return parts.first[0].toLowerCase() +
-      parts.first.substring(1) +
+  return parts.first.toLowerCase() +
       parts
           .skip(1)
-          .map((p) => p[0].toUpperCase() + p.substring(1))
+          .map((p) => p[0].toUpperCase() + p.substring(1).toLowerCase())
           .join();
 }

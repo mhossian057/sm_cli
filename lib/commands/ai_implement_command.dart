@@ -346,7 +346,8 @@ String _normalizeAppThemeImport(String code) {
     final m = importRe.firstMatch(line);
     if (m != null) {
       final path = m.group(1)!;
-      if (path.endsWith('core/theme/app_theme.dart')) {
+      if (!path.startsWith('package:') &&
+          path.endsWith('core/theme/app_theme.dart')) {
         sawCorrect = true;
         lastImportIdx = kept.length;
       } else if (path.contains('app_theme')) {
